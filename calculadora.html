@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculadora Juros sobre Juros | Precisão Bancária</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --primary: #00ff88; --bg: #0f172a; --card: #1e293b; --text: #f8fafc; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; line-height: 1.5; }
+        .container { max-width: 1200px; margin: auto; }
+        
+        /* Painel de Controle */
+        .grid-inputs { 
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+            gap: 15px; background: var(--card); padding: 25px; border-radius: 15px;
+            border: 1px solid #334155;
+        }
+        .input-group { display: flex; flex-direction: column; }
+        label { font-size: 0.7rem; text-transform: uppercase; color: var(--primary); font-weight: 800; margin-bottom: 5px; }
+        input, select { background: #0f172a; border: 1px solid #334155; padding: 12px; border-radius: 8px; color: white; font-weight: bold; }
+        
+        button { 
+            grid-column: 1 / -1; padding: 18px; background: var(--primary); color: #0f172a; 
+            border: none; border-radius: 8px; font-weight: 900; cursor: pointer; 
+            transition: 0.3s; text-transform: uppercase;
+        }
+        button:hover { filter: brightness(1.2); transform: scale(1.01); }
+
+        /* Cards de Resumo */
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin: 30px 0; }
+        .stat-card { background: var(--card); padding: 20px; border-radius: 12px; border-left: 4px solid var(--primary); }
+        .stat-card small { font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 5px; }
+        .stat-card div { font-size: 1.5rem; font-weight: 800; }
+
+        /* Tabela Detalhada */
+        .table-area { 
+            background: var(--card); border-radius: 15px; padding: 0; overflow: hidden;
+            border: 1px solid #334155; margin-top: 20px;
+        }
+        .table-scroll { max-height: 500px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        thead th { position: sticky; top: 0; background: #1e293b; color: var(--primary); padding: 15px; font-size: 0.75rem; text-transform: uppercase; z-index: 10; }
+        td { padding: 12px 15px; border-bottom: 1px solid #334155; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+        
+        .magic-number { background: rgba(0, 255, 136, 0.1); }
+        .juros-valor { color: var(--primary); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header style="text-align: center; margin-bottom: 30px;">
+        <h1 style="margin:0; color: var(--primary);">Juros Compostos PRO</h1>
+        <p style="color: #94a3b8;">Simulação de alta precisão com extrato detalhado</p>
+    </header>
+
+    <div class="grid-inputs">
+        <div class="input-group"><label>Valor Inicial</label><input type="number" id="p" value="5000"></div>
+        <div class="input-group"><label>Valor do Aporte</label><input type="number" id="a" value="500"></div>
+        <div class="input-group">
+            <label>Frequência Aporte</label>
+            <select id="fa"><option value="1">Diário</option><option value="30" selected>Mensal</option></select>
+        </div>
+        <div class="input-group"><label>Taxa Anual (%)</label><input type="number" id="i" value="12.5" step="0.01"></div>
+        <div class="input-group"><label>Tempo Total</label><input type="number" id="t" value="5"></div>
+        <div class="input-group">
+            <label>Unidade</label>
+            <select id="tu"><option value="anos">Anos</option><option value="meses">Meses</option></select>
+        </div>
+        <button onclick="calcular()">GERAR RELATÓRIO COMPLETO</button>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card"><small>Patrimônio Acumulado</small><div id="f-total">R$ 0,00</div></div>
+        <div class="stat-card"><small>Total Ganho em Juros</small><div id="f-juros" style="color:var(--primary)">R$ 0,00</div></div>
+        <div class="stat-card"><small>Rendimento Passivo Diário (Final)</small><div id="f-dia" style="color: #ffd124">R$ 0,00</div></div>
+    </div>
+
+    <div class="table-area">
+        <div style="padding: 15px; border-bottom: 1px solid #334155; font-weight: bold; font-size: 0.9rem;">
+            📊 Extrato Mês a Mês (Juros sobre Juros)
+        </div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Mês</th>
+                        <th>Saldo Inicial</th>
+                        <th>Aportes no Mês</th>
+                        <th>Juros do Mês (+)</th>
+                        <th>Saldo Final</th>
+                    </tr>
+                </thead>
+                <tbody id="lista"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const fmt = (v) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    function calcular() {
+        // Coleta de dados
+        const p = parseFloat(document.getElementById('p').value) || 0;
+        const a = parseFloat(document.getElementById('a').value) || 0;
+        const freq = parseInt(document.getElementById('fa').value);
+        const taxaAnual = parseFloat(document.getElementById('i').value) / 100;
+        const tempo = parseInt(document.getElementById('t').value) || 0;
+        const unidade = document.getElementById('tu').value;
+
+        // Cálculos de taxas equivalentes (Precisão Bancária)
+        const totalMeses = unidade === 'anos' ? tempo * 12 : tempo;
+        const taxaDiaria = Math.pow(1 + taxaAnual, 1/365) - 1;
+        
+        let saldo = p;
+        let totalAportado = p;
+        let html = "";
+
+        // Processamento Mês a Mês
+        for (let m = 1; m <= totalMeses; m++) {
+            let saldoInicioMes = saldo;
+            let aportesNoMes = 0;
+
+            // Simulação diária dentro do mês (30 dias padrão)
+            for (let d = 1; d <= 30; d++) {
+                // Se o aporte for diário, ele entra antes dos juros do dia
+                if (freq === 1) { 
+                    saldo += a; 
+                    aportesNoMes += a; 
+                }
+                
+                // Aplicação dos juros sobre o saldo atualizado
+                saldo *= (1 + taxaDiaria);
+            }
+
+            // Se o aporte for mensal, ele entra ao final do mês
+            if (freq === 30) {
+                saldo += a;
+                aportesNoMes = a;
+            }
+
+            let jurosGanhosNoMes = saldo - saldoInicioMes - aportesNoMes;
+            totalAportado += aportesNoMes;
+
+            // Verifica "Ponto de Inflexão" (Juros > Aporte)
+            const isMagic = jurosGanhosNoMes > aportesNoMes ? "magic-number" : "";
+
+            html += `<tr class="${isMagic}">
+                <td>${m}º Mês</td>
+                <td>${fmt(saldoInicioMes)}</td>
+                <td>${fmt(aportesNoMes)}</td>
+                <td class="juros-valor">+ ${fmt(jurosGanhosNoMes)}</td>
+                <td><strong>${fmt(saldo)}</strong></td>
+            </tr>`;
+        }
+
+        // Atualização dos Painéis
+        document.getElementById('lista').innerHTML = html;
+        document.getElementById('f-total').innerText = fmt(saldo);
+        document.getElementById('f-juros').innerText = fmt(saldo - totalAportado);
+        document.getElementById('f-dia').innerText = fmt(saldo * taxaDiaria);
+    }
+
+    // Iniciar automaticamente
+    window.onload = calcular;
+</script>
+</body>
+</html>
